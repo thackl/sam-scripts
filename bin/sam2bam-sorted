@@ -1,0 +1,11 @@
+#!/bin/bash
+
+if [[ $# -ne 1 || ${1:0:1} == "-" ]]; then
+    echo "Usage: cat *.sam | sam2bam-sorted <out-prefix>" 1>&2;
+    exit;
+fi;
+
+PRE=${1%.bam}
+
+samtools view -bS /dev/fd/0 | samtools sort /dev/fd/0 $PRE
+samtools index $PRE.bam
