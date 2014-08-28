@@ -1,11 +1,29 @@
 #!/bin/bash
 
+# -f INT   required flag, 0 for unset [0]
+# -F INT   filtering flag, 0 for unset [0]
+# -q INT   minimum mapping quality [0]
+# -l STR   only output reads in library STR [null]
+# -r STR   only output reads in read group STR [null]
+
+# Execute getopt
+ARGS=`getopt --name "sam2bam-sorted" \
+    --options "f:F:q:l:r:" \
+    -- "$@"`
+
+#Bad arguments
+[ $? -ne 0 ] && exit 1;
+
+# A little magic
+SAMFILTER=${ARGS%% -- *} # get pass-through options
+eval set -- "${ARGS#* -- }" # set args to $@
+
 if [[ $# -ne 1 || ${1:0:1} == "-" ]]; then
-    echo "Usage: cat *.sam | sam2bam-sorted <out-prefix>" 1>&2;
+    echo "Usage: cat *.sam | sam2bam-sorted [sam-filter-options ()] <out-prefix>" 1>&2;
     exit;
 fi;
 
 PRE=${1%.bam}
 
-samtools view -bS /dev/fd/0 | samtools sort /dev/fd/0 $PRE
+samtools view $SAMFILTER -bS /dev/fd/0 | samtools sort /dev/fd/0 $PRE
 samtools index $PRE.bam
