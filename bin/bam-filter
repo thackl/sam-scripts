@@ -1,0 +1,314 @@
+#!/usr/bin/env perl
+use warnings;
+use strict;
+
+use Pod::Usage;
+use Getopt::Long;
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+
+use List::Util;
+use Data::Dumper;
+use FindBin qw($Script);
+
+use File::Basename;
+use File::Which;
+
+use Sam::Parser 0.11;
+use Sam::Alignment 0.10 ':flags';
+use Sam::Seq 0.16;
+
+use Fasta::Parser;
+use Fasta::Seq;
+
+use Fastq::Parser;
+use Fastq::Seq 0.08;
+
+our $VERSION  = '0.1.0';
+
+
+
+=head1 NAME
+
+sam-filter
+
+=cut
+
+=head1 DESCRIPTION
+
+Filter sorted BAM files by score, from repetitive alignments, etc...
+
+=head1 SYNOPSIS
+
+  bam-filter [options] BAM
+
+=head1 OPTIONS
+
+=over
+
+=item [--min-score/--min-nscore/--min-ncscore]
+
+Filter Alignments with score/nscore/ncscore smaller than specified. nscore
+refers to score normalized by length and ncscore is nscore with penalizing
+correction for very small alignments.
+
+=item [--rep-coverage]
+
+Minimum coverage to consider a region as repetitive. Alignments placed to ~ >80%
+within rep-coverage regions will be filtered.
+
+=item [-D/--debug]
+
+Toggle verbose messages.
+
+=item [-h/--help]
+
+Display this help screen.
+
+=item [-V/--version]
+
+Display script version.
+
+=back
+
+=cut
+
+##----------------------------------------------------------------------------##
+# Globals
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+##----------------------------------------------------------------------------##
+# GetOptions
+
+my $argv = join(" ", @ARGV);
+
+my %def = ();
+
+my %opt = (
+#    bam => undef
+);
+
+GetOptions(
+    \%opt, qw(
+                 out=s
+                 bam=s
+                 invert_scores|invert-scores!
+                 min_score|min-score=s
+                 min_nscore|min-nscore=s
+                 min_ncscore|min-ncscore=s
+                 rep_coverage|rep-coverage=s
+                 version|V!
+                 debug|D!
+                 help|h!
+         )
+) or $L->logcroak('Failed to "GetOptions"');
+
+# help
+$opt{help} && pod2usage(1);
+
+# version
+if ($opt{version}) {
+    print "$VERSION\n"; 
+    exit 0;
+}
+
+##----------------------------------------------------------------------------##
+# Config + Opt
+
+%opt = (%def, %opt);
+
+$opt{bam} = shift(@ARGV) if @ARGV;
+$L->logdie("unused argument: @ARGV") if @ARGV;
+
+$opt{out} = basename($opt{bam}, ".bam").".fil.bam" unless $opt{out};
+
+# required stuff  
+for (qw(bam)) {
+    if (ref $opt{$_} eq 'ARRAY') {
+	pod2usage("required: --$_") unless @{$opt{$_}}
+    } else {
+	pod2usage("required: --$_") unless defined ($opt{$_})
+    }
+};
+
+
+# debug level
+$L->level($DEBUG) if $opt{debug};
+$L->debug('Verbose level set to DEBUG');
+
+$L->debug(Dumper(\%opt));
+
+
+$L->info("Checking binaries");
+# check DAZZ_DB binaries
+my $samtools = bin("samtools");
+check_binary($samtools, ["--version", "1.1"]);
+
+##------------------------------------------------------------------------##
+
+=head1 MAIN
+
+=cut
+
+# Sam::Seq->Trim($cfg{'sr-trim'});
+# Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'}, 1);
+# Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
+# Sam::Seq->MaxCoverage($opt_cov);
+# Sam::Seq->BinSize($opt_bin_size);
+# Sam::Seq->MaxInsLength($opt_max_ins_length);
+# Sam::Seq->FallbackPhred($opt_fallback_phred) if defined($opt_fallback_phred);
+Sam::Seq->RepCoverage($opt{rep_coverage});
+Sam::Seq->MinScore($opt{min_score});
+Sam::Seq->MinNScore($opt{min_nscore});
+Sam::Seq->MinNCScore($opt{min_ncscore});
+
+Sam::Alignment->InvertScores($opt{invert_scores});
+
+
+##----------------------------------------------------------------------------##
+# init sam parser
+my $sam_cmd = "$samtools view -H $opt{bam} |";
+$L->debug($sam_cmd);
+open(SAM, $sam_cmd) or $L->logdie($!);
+my $sp = Sam::Parser->new(fh => \*SAM);
+
+my $sam_out = "| $samtools view -bo $opt{out} -";
+$L->debug($sam_out);
+open(OUT, $sam_out) or $L->logdie($!);
+select OUT;
+
+
+##----------------------------------------------------------------------------##
+# read header
+
+my %R;
+my @R_IDS;
+
+while (my %h = $sp->next_header_line) {
+    print $h{raw};
+    if (exists $h{SN}) {
+        push @R_IDS, $h{SN};
+        $R{$h{'SN'}} = {
+            id => $h{SN}, 
+            len => $h{LN},
+        };
+    }
+}
+
+$L->info("Filtering ".@R_IDS." sequences");
+
+##----------------------------------------------------------------------------##
+# read BAM
+
+my $rn = @R_IDS;
+my ($rc, $ac, $sc);
+my $rc5 = int(($rn/20)+.5);
+my $rc5c;
+my $rcl = length($rn);
+
+foreach my $rid(@R_IDS){
+    $rc++;
+    $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) unless $rc % $rc5;
+    open(SAM, "$samtools view $opt{bam} $rid |") or $L->logdie($!);
+    my $sp = Sam::Parser->new(fh => \*SAM);
+    
+    my $sso = Sam::Seq->new(
+                         id => $R{$rid}{id},
+                         len => $R{$rid}{len},
+                        );
+
+    while(my $aln = $sp->next_aln()){
+        $L->logdie("$rid ne $aln->rname") unless $rid eq $aln->rname;
+        $sso->add_aln($aln);
+    }
+
+    $ac+= $sso->alns;
+    
+    $sso->filter_by_score if defined $opt{min_score};
+    $sso->filter_by_nscore if defined $opt{min_nscore};
+    $sso->filter_by_ncscore if defined $opt{min_ncscore};
+
+    $sso->filter_rep_region_alns if defined $opt{rep_coverage};
+
+    $sc+= $sso->alns;
+
+    print $sso->string;
+    close SAM;
+}
+$L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) if $rc5c < 20;
+$L->info(sprintf("kept %0.2f%% (%d/%d) of alignments", $sc/$ac*100, $sc, $ac));
+
+close OUT;
+
+
+=head2 bin
+
+Return full binary path based on $opt{<bin_path}.
+
+=cut
+
+sub bin{
+    my ($bin) = @_;
+    if (exists $opt{$bin."_path"} && $opt{$bin."_path"}) {
+        return $opt{$bin."_path"}."/".$bin;
+    } else {
+        return $bin;
+    }
+}
+
+
+=head2 check_binary
+
+Check whether a required binary (and version) exists.
+
+=cut
+
+sub check_binary{
+    my($bin, $ver) = (@_);
+    my $fbin = $bin;
+    unless(-e $fbin && -x $fbin){
+        if ($fbin = which($bin)) {
+            $L->logdie("Binary '$fbin' not executable") unless -e $fbin && -x $fbin;
+        } else {
+            $L->logdie("Binary '$bin' neither in PATH nor executable");
+        }
+    }
+
+    $bin = basename($fbin);
+
+    my $v;
+    if ($ver) {
+        $L->logdie("ARRAY ref required") unless ref $ver eq "ARRAY";
+
+        my $vs = qx($fbin $ver->[0]);
+        if ($? or ! $vs) {
+            $L->logdie("Couldn't determine version of $bin, at least $ver->[1] required");
+        }
+
+        ($v) = $vs =~ /(\S+?)\D*$/m;
+
+        if (version->parse($v) < version->parse($ver->[1])) {
+            $L->logdie("Version $v of '$bin' < $v");
+        }
+
+    }
+
+    $L->info(sprintf("  [ok] %-15s %s", $bin.($v ? "-$v" : ""), dirname($fbin)));
+
+}
+
+
+=head1 AUTHORS
+
+Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
+
+=cut
