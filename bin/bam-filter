@@ -117,7 +117,7 @@ $opt{help} && pod2usage(1);
 
 # version
 if ($opt{version}) {
-    print "$VERSION\n"; 
+    print "$VERSION\n";
     exit 0;
 }
 
@@ -131,7 +131,7 @@ $L->logdie("unused argument: @ARGV") if @ARGV;
 
 $opt{out} = basename($opt{bam}, ".bam").".fil.bam" unless $opt{out};
 
-# required stuff  
+# required stuff
 for (qw(bam)) {
     if (ref $opt{$_} eq 'ARRAY') {
 	pod2usage("required: --$_") unless @{$opt{$_}}
@@ -175,6 +175,12 @@ Sam::Alignment->InvertScores($opt{invert_scores});
 
 
 ##----------------------------------------------------------------------------##
+unless ( -e $opt{bam}.".bai" ) {
+    my $sam_idx = "$samtools index $opt{bam}.bai";
+    $L->debug($sam_idx);
+    qx($sam_idx);
+}
+
 # init sam parser
 my $sam_cmd = "$samtools view -H $opt{bam} |";
 $L->debug($sam_cmd);
@@ -198,7 +204,7 @@ while (my %h = $sp->next_header_line) {
     if (exists $h{SN}) {
         push @R_IDS, $h{SN};
         $R{$h{'SN'}} = {
-            id => $h{SN}, 
+            id => $h{SN},
             len => $h{LN},
         };
     }
@@ -220,7 +226,7 @@ foreach my $rid(@R_IDS){
     $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) unless $rc % $rc5;
     open(SAM, "$samtools view $opt{bam} $rid |") or $L->logdie($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
-    
+
     my $sso = Sam::Seq->new(
                          id => $R{$rid}{id},
                          len => $R{$rid}{len},
@@ -232,7 +238,7 @@ foreach my $rid(@R_IDS){
     }
 
     $ac+= $sso->alns;
-    
+
     $sso->filter_by_score if defined $opt{min_score};
     $sso->filter_by_nscore if defined $opt{min_nscore};
     $sso->filter_by_ncscore if defined $opt{min_ncscore};
