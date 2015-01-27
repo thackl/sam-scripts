@@ -208,34 +208,26 @@ my $dbshow = bin("DBshow");
 check_binary($dbshow);
 
 
-$L->info("Reading DB/DAM and creating header");
+$L->info("Reading DB/DAM");
+my ($rdb, $rldb, $rids) = map_db($opt{ref});
+    
+my ($qdb, $qldb);
+if($opt{qry} eq $opt{ref}){
+    ($qdb, $qldb) = ($rdb, $rldb);
+}else{
+    ($qdb, $qldb) = map_db($opt{qry});
+}
 
-my $ref_db;
-open(RDB, "$dbshow $opt{ref} |");
-my $fp = Fasta::Parser->new(fh => \*RDB);
+
+$L->info("Creating header");
+
 print "\@HD\tVN:unknown\tSO:coordinate\n";
-my $c;
-while(my $fa = $fp->next_seq){
-    $c++;
-    print "\@SQ\tSN:",$fa->id,"\tLN:",length($fa->seq),"\n";
-    $ref_db->{$c} = {id => $fa->id, len => length($fa->seq)};
+foreach my $id (@$rids) {
+    print "\@SQ\tSN:",$id,"\tLN:",$rldb->{$id},"\n";
 }
 print "\@PG\tID:dazz2sam\tVN:$VERSION\tCL:dazz2sam $argv\n";
-close RDB;
 
-my $qry_db;
-if($opt{qry} eq $opt{ref}){
-  $qry_db = $ref_db;
-}else{
-    open(QDB, "$dbshow $opt{qry} |");
-    my $fp = Fasta::Parser->new(fh => \*QDB);
-    my $c;
-    while(my $fa = $fp->next_seq){
-        $c++;
-        $qry_db->{$c} = {id => $fa->id, len => length($fa->seq)};
-    }
-}
-close QDB;
+
 
 open(DZ, "$lashow $opt{ref} $opt{qry} $opt{las} -a -U -w80 -b0 |");
 scalar <DZ>; # skip empty line
@@ -279,6 +271,9 @@ while(
 }
 
 close(DZ);
+
+$? && $L->logdie("Failed: $lashow $opt{ref} $opt{qry} $opt{las}");
+
 $L->info("Done.");
 
 my %sec;
@@ -300,12 +295,12 @@ sub las2sam{
     $sec{$qiid}++;
     my $rev = $dir eq "c" ? 0x100 : 0;
     
-    $qname = $qry_db->{$qiid}{id};
+    $qname = $qdb->{$qiid};
     $flag = 0 | $sec | $rev;
     $pos = $rstart+1;
-    $rname = $ref_db->{$riid}{id};
+    $rname = $rdb->{$riid};
     $mapq = 255;
-    $cigar = aln2cigar($rseq, $qseq, $qstart, $qend, $qry_db->{$qiid}{len});
+    $cigar = aln2cigar($rseq, $qseq, $qstart, $qend, $qldb->{$qdb->{$qiid}});
     $rnext = "*";
     $pnext = 0;
     $tlen = 0;
@@ -428,4 +423,32 @@ sub check_binary{
 
     $L->info(sprintf("  [ok] %-15s %s", $bin.($v ? "-$v" : ""), dirname($fbin)));
 
+}
+
+
+sub map_db{
+    my $db = shift;
+    my %db;
+    my %len;
+    my @ids;
+    open(RDB, "$dbshow $db |") or $L->logdie($!);
+
+    my $fp = Fasta::Parser->new(fh => \*RDB);
+    
+    my $c;
+    while(my $fa = $fp->next_seq){
+        $c++;
+        $db{$c} = $fa->id;
+        if ( defined($len{$fa->id}) ){
+            $len{$fa->id}+= length($fa->seq)
+        }else {
+            push @ids, $fa->id;
+            $len{$fa->id} = length($fa->seq)
+        }
+    }
+    close RDB;
+
+    $? && $L->logdie("Failed: $dbshow $db");
+    
+    return \%db, \%len, \@ids;
 }
