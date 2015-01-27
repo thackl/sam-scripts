@@ -57,9 +57,9 @@ Query DAZZ_DB .db/.dam if available.
 =item [-S/--add-scores]
 
 Compute a score for each alignment and add AS:i:<SCORE> tag to SAM. Default
-scoring scheme is derived from proovreads pacbio scoring scheme, also used for
-bwa mappings. Costs are defined in the scripts constants sections and can be
-adjusted if needed.
+scoring scheme is derived from proovreads
+(https://github.com/BioInf-Wuerzburg/proovread) pacbio scoring scheme. Costs are
+defined in the scripts constants sections and can be adjusted if needed.
 
 =item [-c/--config <PATH PATH ...>]
 
