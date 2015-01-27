@@ -1,0 +1,21 @@
+** Install
+#+BEGIN_EXAMPLE
+# libs
+git clone https://github.com/BioInf-Wuerzburg/perl5lib-Fasta.git
+export PERL5LIB=`pwd`/perl5lib-Fasta/lib/:$PATH
+
+# scripts
+git clone https://github.com/thackl/sam-scripts.git
+
+#+END_EXAMPLE
+
+** Use
+*** dazz2sam
+Convert [[https://github.com/thegenemyers][DALIGNER]] output to SAM format.
+
+#+BEGIN_EXAMPLE
+export PATH=`pwd`/sam-scripts/bin:$PATH;
+
+dazz2sam --help
+dazz2sam [options] --las LAS --ref DB/DAM [--qry DB/DAM] > SAM
+#+END_EXAMPLE
