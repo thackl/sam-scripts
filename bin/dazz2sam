@@ -452,3 +452,10 @@ sub map_db{
     
     return \%db, \%len, \@ids;
 }
+
+
+=head1 AUTHORS
+
+Thomas Hackl - S<thackl@lim4.de>
+
+=cut
