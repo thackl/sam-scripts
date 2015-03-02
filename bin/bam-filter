@@ -57,6 +57,10 @@ correction for very small alignments.
 Minimum coverage to consider a region as repetitive. Alignments placed to ~ >80%
 within rep-coverage regions will be filtered.
 
+=item [--filter-contained]
+
+Remove alignments that are contained in other alignments.
+
 =item [-D/--debug]
 
 Toggle verbose messages.
@@ -106,6 +110,7 @@ GetOptions(
                  min_nscore|min-nscore=s
                  min_ncscore|min-ncscore=s
                  rep_coverage|rep-coverage=s
+                 filter_contained|filter-contained!
                  version|V!
                  debug|D!
                  help|h!
@@ -244,6 +249,8 @@ foreach my $rid(@R_IDS){
     $sso->filter_by_ncscore if defined $opt{min_ncscore};
 
     $sso->filter_rep_region_alns if defined $opt{rep_coverage};
+
+    $sso->filter_contained_alns if defined $opt{filter_contained};
 
     $sc+= $sso->alns;
 
