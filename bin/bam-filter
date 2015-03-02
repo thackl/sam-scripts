@@ -247,7 +247,7 @@ foreach my $rid(@R_IDS){
 
     $sc+= $sso->alns;
 
-    print $sso->string;
+    print $sso->string(sorted=>1);
     close SAM;
 }
 $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) if $rc5c < 20;
