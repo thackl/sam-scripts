@@ -1,0 +1,39 @@
+#!/usr/bin/env perl
+
+unless ( @ARGV || $ARGV[0] =~ /-h/) {
+    print "Usage: bam-coverage <bam> > cov.tsv\n";
+    exit;
+}
+
+open (BEDCOV, "bedtools genomecov -ibam $ARGV[0] |") or die $!;
+my $cctg = undef;
+my $tcov = 0;
+my $tn = 0;
+my ($ctg, $cov, $n, $len, $med);
+
+print "rid\tmean\tmedian\n";
+
+while (<BEDCOV>) {
+    chomp;
+    ($ctg, $cov, $n, $len) = split("\t", $_);
+    unless (defined $cctg) {$cctg = $ctg}
+    if ($cctg ne $ctg) {
+        print sprintf("%s\t%0.2f\t%d\n", $cctg, $tcov/$len, $med);
+        $cctg = $ctg;
+        $tcov = 0;
+        $fmed = 0;
+    }
+
+    $tn+=$n;
+    $tcov+=($cov*$n);
+    
+    if (!$fmed && $tn >= $len/2 ) {
+        $med = $cov;
+        $fmed++;
+    }
+}
+
+unless ( $ctg eq "genome" ) {
+    print sprintf("%s\t%0.2f\t%d\n", $ctg, $tcov/$len, $med);
+}
+
