@@ -222,7 +222,7 @@ $L->info("Filtering ".@R_IDS." sequences");
 
 my $rn = @R_IDS;
 my ($rc, $ac, $sc);
-my $rc5 = int(($rn/20)+.5);
+my $rc5 = int(($rn/20)+.5) || 1;
 my $rc5c;
 my $rcl = length($rn);
 
