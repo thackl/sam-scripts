@@ -291,9 +291,9 @@ sub las2sam{
     #print Dumper($head, $riid, $qiid, $dir, $rfrom, $rto, $qfrom, $qto);
 
     tr/,//d for ($riid, $qiid, $rstart, $rend, $qstart, $qend);
-    my $sec = $sec{$qiid} ? 0x10 : 0;
+    my $rev = $dir eq "c" ? 0x10 : 0;
+    my $sec = $sec{$qiid} ? 0x100 : 0;
     $sec{$qiid}++;
-    my $rev = $dir eq "c" ? 0x100 : 0;
     
     $qname = $qdb->{$qiid};
     $flag = 0 | $sec | $rev;
