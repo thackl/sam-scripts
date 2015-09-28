@@ -22,9 +22,9 @@ use Fasta::Parser;
 use Fasta::Seq;
 
 use Fastq::Parser;
-use Fastq::Seq 0.08;
+use Fastq::Seq;
 
-our $VERSION  = '0.1.0';
+our $VERSION  = '0.1.1';
 
 
 
@@ -75,6 +75,10 @@ Display script version.
 
 =back
 
+=head1 AUTHORS
+
+Thomas Hackl S<thackl@lim4.de>
+
 =cut
 
 ##----------------------------------------------------------------------------##
@@ -90,79 +94,16 @@ Log::Log4perl->init( \(q(
 
 my $L = Log::Log4perl->get_logger();
 
-##----------------------------------------------------------------------------##
-# GetOptions
-
-my $argv = join(" ", @ARGV);
-
-my %def = ();
-
-my %opt = (
-#    bam => undef
-);
-
-GetOptions(
-    \%opt, qw(
-                 out=s
-                 bam=s
-                 invert_scores|invert-scores!
-                 min_score|min-score=s
-                 min_nscore|min-nscore=s
-                 min_ncscore|min-ncscore=s
-                 rep_coverage|rep-coverage=s
-                 filter_contained|filter-contained!
-                 version|V!
-                 debug|D!
-                 help|h!
-         )
-) or $L->logcroak('Failed to "GetOptions"');
-
-# help
-$opt{help} && pod2usage(1);
-
-# version
-if ($opt{version}) {
-    print "$VERSION\n";
-    exit 0;
-}
-
-##----------------------------------------------------------------------------##
-# Config + Opt
-
-%opt = (%def, %opt);
-
-$opt{bam} = shift(@ARGV) if @ARGV;
-$L->logdie("unused argument: @ARGV") if @ARGV;
-
-$opt{out} = basename($opt{bam}, ".bam").".fil.bam" unless $opt{out};
-
-# required stuff
-for (qw(bam)) {
-    if (ref $opt{$_} eq 'ARRAY') {
-	pod2usage("required: --$_") unless @{$opt{$_}}
-    } else {
-	pod2usage("required: --$_") unless defined ($opt{$_})
-    }
-};
 
 
-# debug level
-$L->level($DEBUG) if $opt{debug};
-$L->debug('Verbose level set to DEBUG');
-
-$L->debug(Dumper(\%opt));
-
-
-$L->info("Checking binaries");
-# check DAZZ_DB binaries
-my $samtools = bin("samtools");
-check_binary($samtools, ["--version", "1.1"]);
 
 ##------------------------------------------------------------------------##
 
 =head1 MAIN
 
 =cut
+
+my %opt = prep();
 
 # Sam::Seq->Trim($cfg{'sr-trim'});
 # Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'}, 1);
@@ -181,18 +122,18 @@ Sam::Alignment->InvertScores($opt{invert_scores});
 
 ##----------------------------------------------------------------------------##
 unless ( -e $opt{bam}.".bai" ) {
-    my $sam_idx = "$samtools index $opt{bam}.bai";
+    my $sam_idx = "$opt{samtools} index $opt{bam}.bai";
     $L->debug($sam_idx);
     qx($sam_idx);
 }
 
 # init sam parser
-my $sam_cmd = "$samtools view -H $opt{bam} |";
+my $sam_cmd = "$opt{samtools} view -H $opt{bam} |";
 $L->debug($sam_cmd);
 open(SAM, $sam_cmd) or $L->logdie($!);
 my $sp = Sam::Parser->new(fh => \*SAM);
 
-my $sam_out = "| $samtools view -bo $opt{out} -";
+my $sam_out = "| $opt{samtools} view -bo $opt{out} -";
 $L->debug($sam_out);
 open(OUT, $sam_out) or $L->logdie($!);
 select OUT;
@@ -229,7 +170,7 @@ my $rcl = length($rn);
 foreach my $rid(@R_IDS){
     $rc++;
     $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) unless $rc % $rc5;
-    open(SAM, "$samtools view $opt{bam} $rid |") or $L->logdie($!);
+    open(SAM, "$opt{samtools} view $opt{bam} $rid |") or $L->logdie($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
 
     my $sso = Sam::Seq->new(
@@ -261,6 +202,80 @@ $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) if $rc5c < 20;
 $L->info(sprintf("kept %0.2f%% (%d/%d) of alignments", $sc/$ac*100, $sc, $ac));
 
 close OUT;
+
+
+
+##----------------------------------------------------------------------------##
+# subs
+##----------------------------------------------------------------------------##
+
+=head2 prep
+
+=cut
+
+sub prep{
+    my (%p) = @_;
+    my $argv = join(" ", @ARGV);
+
+    my %opt = (
+        #    bam => undef
+    );
+
+    GetOptions(
+        \%opt, qw(
+                     out=s
+                     bam=s
+                     invert_scores|invert-scores!
+                     min_score|min-score=s
+                     min_nscore|min-nscore=s
+                     min_ncscore|min-ncscore=s
+                     rep_coverage|rep-coverage=s
+                     filter_contained|filter-contained!
+                     version|V!
+                     debug|D!
+                     help|h!
+             )
+    ) or $L->logcroak('Failed to "GetOptions"');
+
+    # help
+    (!$argv || $opt{help}) && pod2usage(1);
+
+    # version
+    if ($opt{version}) {
+        print "$VERSION\n";
+        exit 0;
+    }
+
+    ##----------------------------------------------------------------------------##
+    # Config + Opt
+    $opt{bam} //= shift(@ARGV) if @ARGV;
+    $L->logdie("unused argument: @ARGV") if @ARGV;
+
+    $opt{out} = basename($opt{bam}, ".bam").".fil.bam" unless $opt{out};
+
+    # required stuff
+    for (qw(bam)) {
+        if (ref $opt{$_} eq 'ARRAY') {
+            pod2usage("required: --$_") unless @{$opt{$_}}
+        } else {
+            pod2usage("required: --$_") unless defined ($opt{$_})
+        }
+    }
+
+    # debug level
+    $L->level($DEBUG) if $opt{debug};
+    $L->debug('Verbose level set to DEBUG');
+
+    $L->debug(Dumper(\%opt));
+
+
+    $L->info("Checking binaries");
+    # check DAZZ_DB binaries
+    $opt{samtools} = bin("samtools");
+    check_binary($opt{samtools}, ["--version", "1.1"]);
+
+    return %opt;
+}
 
 
 =head2 bin
@@ -319,9 +334,3 @@ sub check_binary{
 
 }
 
-
-=head1 AUTHORS
-
-Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
-
-=cut
