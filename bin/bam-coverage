@@ -1,39 +1,63 @@
 #!/usr/bin/env perl
+# Author: Thomas Hackl, thackl@lim4.de
+
+use warnings;
+use strict;
 
 unless ( @ARGV || $ARGV[0] =~ /-h/) {
     print "Usage: bam-coverage <bam> > cov.tsv\n";
     exit;
 }
 
-open (BEDCOV, "bedtools genomecov -ibam $ARGV[0] |") or die $!;
+open (BEDCOV, "bedtools genomecov -d -ibam $ARGV[0] |") or die $!;
+open (CTGLEN, "samtools idxstats $ARGV[0] | cut -f2 |") or die $!;
 my $cctg = undef;
 my $tcov = 0;
 my $tn = 0;
-my ($ctg, $cov, $n, $len, $med);
+my ($ctg, $pos, $cov);
+my %covs; # store for median comp.
 
-print "rid\tmean\tmedian\n";
+#print "rid\tmean\tmedian\n";
 
 while (<BEDCOV>) {
     chomp;
-    ($ctg, $cov, $n, $len) = split("\t", $_);
+    ($ctg, $pos, $cov) = split("\t", $_);
     unless (defined $cctg) {$cctg = $ctg}
     if ($cctg ne $ctg) {
-        print sprintf("%s\t%0.2f\t%d\n", $cctg, $tcov/$len, $med);
+        my $len = <CTGLEN>;
+        chomp($len);
+        my $mean = $tcov/$len;
+        my $med = median_cov(\%covs,$len);
+
+        print sprintf("%s\t%0.2f\t%d\n", $cctg, $mean, $med);
         $cctg = $ctg;
         $tcov = 0;
-        $fmed = 0;
+        %covs = ();
     }
 
-    $tn+=$n;
-    $tcov+=($cov*$n);
-    
-    if (!$fmed && $tn >= $len/2 ) {
-        $med = $cov;
-        $fmed++;
+    $tcov+=$cov;
+    $covs{$cov}++;
+}
+
+my $len = <CTGLEN>;
+chomp($len);
+my $mean = $tcov/$len;
+my $med = median_cov(\%covs,$len);
+print sprintf("%s\t%0.2f\t%d\n", $ctg, $mean, $med);
+
+
+sub median_cov{
+    my ($c,$len) = @_;
+    my $s = 0;
+    my $l50 = $len/2;
+    my $med;
+    foreach (sort{$a<=>$b}keys %$c) {
+        $s+=$c->{$_};
+        if ($s > $l50){
+            $med=$_;
+            last;
+        }
+        
     }
+    return $med;
 }
-
-unless ( $ctg eq "genome" ) {
-    print sprintf("%s\t%0.2f\t%d\n", $ctg, $tcov/$len, $med);
-}
-
