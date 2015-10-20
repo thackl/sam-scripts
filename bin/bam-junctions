@@ -22,7 +22,7 @@ use Fasta::Parser;
 use Fasta::Seq;
 
 use Fastq::Parser;
-use Fastq::Seq 0.08;
+use Fastq::Seq;
 
 our $VERSION  = '0.1.0';
 
