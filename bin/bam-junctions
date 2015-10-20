@@ -24,7 +24,7 @@ use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq;
 
-our $VERSION  = '0.1.0';
+our $VERSION  = '0.2.0';
 
 
 
@@ -57,6 +57,10 @@ Minimum overhang after junction.
 =item [-c] [10]
 
 Minimum coverage supporting junction.
+
+=item [-x] [0]
+
+Maximum coverage spanning the junction.
 
 =item [-d] [OFF]
 
@@ -115,6 +119,7 @@ my %opt = (
     min_aln_len => 100,
     min_ovh_len => 100,
     min_jnt_cov => 10,
+    max_alt_cov => 0,
     sticky_len => 50,
     term_ignore => 5,
 );
@@ -124,6 +129,7 @@ GetOptions(
                  min_aln_len|min-aln-len|a=i
                  min_ovh_len|min-ovh-len|o=i
                  min_jnt_cov|min-jnt-cov|c=i
+                 max_alt_cov|max-alt-cov|x=i
                  sticky_len|s=i
                  dump|d!
                  term_ignore|t=i
@@ -153,8 +159,6 @@ if ($opt{version}) {
 $opt{bam} = shift(@ARGV) if @ARGV;
 $L->logdie("unused argument: @ARGV") if @ARGV;
 
-$opt{out} = basename($opt{bam}, ".bam")."-junction-reads.fa" unless $opt{out};
-
 # required stuff
 for (qw(bam)) {
     if (ref $opt{$_} eq 'ARRAY') {
@@ -164,6 +168,7 @@ for (qw(bam)) {
     }
 };
 
+$opt{out} = basename($opt{bam}, ".bam")."-junction-reads.fa" unless $opt{out};
 
 # debug level
 $L->level($DEBUG) if $opt{debug};
@@ -258,8 +263,6 @@ if ($opt{dump}) {
     open(OUT, ">", $opt{out}) or die $!;
 }
 
-
-
 foreach my $rid(@R_IDS){
     $rc++;
     #$L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) unless $rc % $rc5;
@@ -274,9 +277,9 @@ foreach my $rid(@R_IDS){
                         );
     my %apre;
     my %asuf;
-    
+
     while(my $aln = $sp->next_aln()){
-        next if $aln->is(UNMAPPED) or $aln->is(0x800); # unmapped or supplement
+        next if $aln->is(UNMAPPED + SUPPLEMENTARY + SECONDARY); # unmapped or supplement
         $L->logdie("$rid ne $aln->rname") unless $rid eq $aln->rname;
         $ac++;
 
@@ -289,8 +292,6 @@ foreach my $rid(@R_IDS){
         push @{$asuf{$aln->pos + length($aln->seq_aligned) -1 }}, $aln if $suf && $suf >= $opt{min_ovh_len};
     }
 
-    $L->info("junctions with upstream overhang");
-    
     # pre == 5' == upstream
     foreach my $j (sort{$a<=>$b}keys %apre) {
         if ($opt{term_ignore}) {
@@ -301,7 +302,19 @@ foreach my $rid(@R_IDS){
         my $cov = @$alns;
         if ( $cov < $opt{min_jnt_cov} ){ next; }
 
-        $L->info(sprintf("%9d %4d", $j, $cov));
+        # get full length aligned reads spanning the junction
+        my $alt_cov = -1;
+        if ($opt{max_alt_cov} ) {
+            my $jp = Sam::Parser->new(file => $opt{bam}, region=>"$rid:$j-$j", is => sub{! $_[0]->is(SECONDARY+SUPPLEMENTARY) });
+            $alt_cov = 0;
+            while (my $aln = $jp->next_aln) {
+                #print $aln->pos,"\t",$aln->length,"\n";
+                $alt_cov++ if ($aln->pos < $j-30) && ($aln->pos + $aln->length > $j+30);
+            }
+            next if $alt_cov > $opt{max_alt_cov};
+        }
+
+        print "$rid:$j\tu\t$cov\t$alt_cov\n";
 
         if ($opt{dump}) {
             my $k = 0;
@@ -324,8 +337,6 @@ foreach my $rid(@R_IDS){
     #print $sso->string(sorted=>1);
     close SAM;
 
-    $L->info("junctions with downstream overhang");
-
     # suf == 3' == downstream
     foreach my $j (sort{$a<=>$b}keys %asuf) {
         if ($opt{term_ignore}) {
@@ -336,8 +347,20 @@ foreach my $rid(@R_IDS){
         my $cov = @$alns;
         if ( $cov < $opt{min_jnt_cov} ){ next; }
 
-        $L->info(sprintf("%9d %4d", $j, $cov));
-        
+        # get full length aligned reads spanning the junction
+        my $alt_cov = -1;
+        if ($opt{max_alt_cov} ) {
+            my $jp = Sam::Parser->new(file => $opt{bam}, region=>"$rid:$j-$j", is => sub{! $_[0]->is(SECONDARY+SUPPLEMENTARY) });
+            $alt_cov = 0;
+            while (my $aln = $jp->next_aln) {
+                #print $aln->pos,"\t",$aln->length,"\n";
+                $alt_cov++ if ($aln->pos < $j-30) && ($aln->pos + $aln->length > $j+30);
+            }
+            next if $alt_cov > $opt{max_alt_cov};
+        }
+
+        print "$rid:$j\td\t$cov\t$alt_cov\n";
+
         if ($opt{dump}) {
             my $k = 0;
             foreach my $aln (@$alns) {
