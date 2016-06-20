@@ -168,9 +168,10 @@ my $rc5c;
 my $rcl = length($rn);
 
 foreach my $rid(@R_IDS){
+    print STDERR $rid,"\n";
     $rc++;
     $L->info(sprintf(" %3d%% [%${rcl}d]", (++$rc5c * 5), $rc)) unless $rc % $rc5;
-    open(SAM, "$opt{samtools} view $opt{bam} $rid |") or $L->logdie($!);
+    open(SAM, "$opt{samtools} view $opt{bam} \"$rid\" |") or $L->logdie($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
 
     my $sso = Sam::Seq->new(
