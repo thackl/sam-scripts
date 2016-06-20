@@ -440,7 +440,7 @@ sub check_binary{
 
         ($v) = $vs =~ /(\S+?)\D*$/m;
 
-        if (version->parse($v) < version->parse($ver->[1])) {
+        if (version->declare($v) < version->declare($ver->[1])) {
             $L->logdie("Version $v of '$bin' < $v");
         }
 
