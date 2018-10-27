@@ -40,34 +40,35 @@ if [[ "$OPT" == *-h* || $# -gt 2 ]]; then
 fi;
 
 OPTVIEW=$OPT
+TMP=`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8`
 
 # stdout or prefix+index
 if [[ $# -eq 0 ]]; then
     echo "[sam2bam-sorted] Reading stdin" 1>&2;
-    CMD="samtools view -ub $OPTVIEW /dev/fd/0 | samtools sort -m 4G"
+    CMD="samtools view -ub $OPTVIEW /dev/fd/0 | samtools sort -m 4G -T $TMP"
     echo "[sam2bam-sorted] $CMD" 1>&2;
     eval $CMD;
 elif [[ $# -eq 1 ]]; then
     if [[ $1 == *".sam" ]]; then
         PRE=${1%.sam}
-        CMD="samtools view -ub $OPTVIEW $1 | samtools sort -m 4G -o $PRE.bam /dev/fd/0 && samtools index $PRE.bam";
+        CMD="samtools view -ub $OPTVIEW $1 | samtools sort -m 4G -o $PRE.bam -T $TMP /dev/fd/0 && samtools index $PRE.bam";
         echo "[sam2bam-sorted] $CMD" 1>&2;
         eval $CMD;
     else
         echo "[sam2bam-sorted] Reading stdin" 1>&2;
         PRE=${1%.bam}
-        CMD="samtools view -ub $OPTVIEW | samtools sort -m 4G -o $PRE.bam /dev/fd/0 && samtools index $PRE.bam";
+        CMD="samtools view -ub $OPTVIEW | samtools sort -m 4G -o $PRE.bam -T $TMP /dev/fd/0 && samtools index $PRE.bam";
         echo "[sam2bam-sorted] $CMD" 1>&2;
         eval $CMD;
     fi;
 elif [[ $# -eq 2 ]]; then  
     if [[ $2 == "-" ]]; then
-        CMD="samtools view -ub $OPTVIEW | samtools sort -m 4G"
+        CMD="samtools view -ub $OPTVIEW | samtools sort -m 4G -T $TMP"
         echo "[sam2bam-sorted] $CMD" 1>&2;
         eval $CMD;
     else
         PRE=${2%.bam}
-        CMD="samtools view -ub $OPTVIEW $1 | samtools sort -m 4G -o $PRE /dev/fd/0 && samtools index $PRE.bam";
+        CMD="samtools view -ub $OPTVIEW $1 | samtools sort -m 4G -o $PRE -T $TMP /dev/fd/0 && samtools index $PRE.bam";
         echo "[sam2bam-sorted] $CMD" 1>&2;
         eval $CMD;
     fi;
