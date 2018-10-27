@@ -4,7 +4,9 @@
 use warnings;
 use strict;
 
-unless ( @ARGV || $ARGV[0] =~ /-h/) {
+if ( !@ARGV || $ARGV[0] =~ /-h/) {
+    print "Compute mean and median coverage per sequence.\n";
+    print "Requires bedtools and samtools.\n\n";
     print "Usage: bam-coverage <bam> > cov.tsv\n";
     exit;
 }
