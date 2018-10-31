@@ -11,42 +11,37 @@ if ( !@ARGV || $ARGV[0] =~ /-h/) {
     exit;
 }
 
-open (BEDCOV, "bedtools genomecov -d -ibam $ARGV[0] |") or die $!;
-open (CTGLEN, "samtools idxstats $ARGV[0] | cut -f2 |") or die $!;
+# this fails to report 0 depth for ref seqs without any alignments
+#open (BEDCOV, "bedtools genomecov -d -ibam $ARGV[0] |") or die $!; 
+#open (CTGLEN, "samtools idxstats $ARGV[0] | cut -f2 |") or die $!;
+
+open (SAMCOV, "samtools depth -aa $ARGV[0] |") or die $!;
 my $cctg = undef;
 my $tcov = 0;
 my $tn = 0;
 my ($ctg, $pos, $cov);
 my %covs; # store for median comp.
 
-#print "rid\tmean\tmedian\n";
-
-while (<BEDCOV>) {
+while (<SAMCOV>) {
     chomp;
     ($ctg, $pos, $cov) = split("\t", $_);
-    unless (defined $cctg) {$cctg = $ctg}
-    if ($cctg ne $ctg) {
-        my $len = <CTGLEN>;
-        chomp($len);
-        my $mean = $tcov/$len;
-        my $med = median_cov(\%covs,$len);
-
-        print sprintf("%s\t%0.2f\t%d\n", $cctg, $mean, $med);
-        $cctg = $ctg;
-        $tcov = 0;
-        %covs = ();
-    }
-
+    $cctg//= $ctg;
+    $cctg ne $ctg && report_cov();
     $tcov+=$cov;
     $covs{$cov}++;
 }
+report_cov();
 
-my $len = <CTGLEN>;
-chomp($len);
-my $mean = $tcov/$len;
-my $med = median_cov(\%covs,$len);
-print sprintf("%s\t%0.2f\t%d\n", $ctg, $mean, $med);
 
+sub report_cov{
+    my $mean = $tcov/$pos; # pos==length
+    my $med = median_cov(\%covs,$pos);
+    
+    print sprintf("%s\t%d\t%0.2f\t%d\n", $cctg, $pos, $mean, $med);
+    $cctg = $ctg;
+    $tcov = 0;
+    %covs = ();
+}
 
 sub median_cov{
     my ($c,$len) = @_;
