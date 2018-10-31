@@ -61,5 +61,5 @@ sub median_cov{
         }
         
     }
-    return $med;
+    return $med // 0;
 }
