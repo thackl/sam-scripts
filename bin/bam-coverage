@@ -5,15 +5,11 @@ use warnings;
 use strict;
 
 if ( !@ARGV || $ARGV[0] =~ /-h/) {
-    print "Compute mean and median coverage per sequence.\n";
-    print "Requires bedtools and samtools.\n\n";
+    print "Compute mean and median coverage per sequence with `samtools depth`.\n";
+    print "Returns columns: seq_id, length, mean_cov, median_cov\n\n";
     print "Usage: bam-coverage <bam> > cov.tsv\n";
     exit;
 }
-
-# this fails to report 0 depth for ref seqs without any alignments
-#open (BEDCOV, "bedtools genomecov -d -ibam $ARGV[0] |") or die $!; 
-#open (CTGLEN, "samtools idxstats $ARGV[0] | cut -f2 |") or die $!;
 
 open (SAMCOV, "samtools depth -aa $ARGV[0] |") or die $!;
 my $cctg = undef;
@@ -31,6 +27,7 @@ while (<SAMCOV>) {
     $tcov+=$cov;
     $covs{$cov}++;
 }
+die "Empty or corrupted input bam\n" unless (defined($len));
 report_cov();
 
 
