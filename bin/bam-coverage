@@ -19,7 +19,7 @@ open (SAMCOV, "samtools depth -aa $ARGV[0] |") or die $!;
 my $cctg = undef;
 my $tcov = 0;
 my $tn = 0;
-my ($ctg, $pos, $cov);
+my ($ctg, $pos, $cov, $len);
 my %covs; # store for median comp.
 
 while (<SAMCOV>) {
@@ -27,6 +27,7 @@ while (<SAMCOV>) {
     ($ctg, $pos, $cov) = split("\t", $_);
     $cctg//= $ctg;
     $cctg ne $ctg && report_cov();
+    $len = $pos; # needs lag
     $tcov+=$cov;
     $covs{$cov}++;
 }
@@ -34,10 +35,10 @@ report_cov();
 
 
 sub report_cov{
-    my $mean = $tcov/$pos; # pos==length
-    my $med = median_cov(\%covs,$pos);
+    my $mean = $tcov/$len;
+    my $med = median_cov(\%covs,$len);
     
-    print sprintf("%s\t%d\t%0.2f\t%d\n", $cctg, $pos, $mean, $med);
+    print sprintf("%s\t%d\t%0.2f\t%d\n", $cctg, $len, $mean, $med);
     $cctg = $ctg;
     $tcov = 0;
     %covs = ();
