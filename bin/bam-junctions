@@ -251,14 +251,24 @@ sub filter_spanned_junctions{
     for my $ah ($apre, $asuf) {
         my %cov;
 
-        
-        foreach my $pos(keys %$ah) {
+        my @pos = keys %$ah;
+        foreach my $pos(@pos) {
             my ($from, $to) = pos_from_to($pos);
             $cov{$from} = {pos => $pos, to => $to, cov => 0};
         }
 
+        my $region;
+        #$region=$rid.$from_to;
+        if (0 == @pos) {
+             next;
+        }elsif (@pos < 100) {
+            $region = join(" ", map{$rid.":".(join("-", pos_from_to($_)))}@pos);
+         }else{
+            $region=$rid.$from_to;
+        }
+
         # filter unmapped or secondary
-        open(SAM, "$samtools view -F 260 $bam_file $rid$from_to |") or die $!;
+        open(SAM, "$samtools view -F 260 $bam_file $region |") or die $!;
         my $sp = Sam::Parser->new(fh => \*SAM);
         my $ac=0;
         while(my  $aln = $sp->next_aln()){
