@@ -23,7 +23,7 @@ GetOptions (
     "min-aln-len|a=i" => \(my $min_aln_len = 100),
     "min-ovh-len|b=i" => \(my $min_ovh_len = 100),
     "min-jnc-cov|c=i" => \(my $min_jnc_cov = 10),
-    "max-ref-cov|d=i" => \(my $max_ref_cov = 0),
+    "max-ref-cov|d=i" => \(my $max_ref_cov = -1),
     "end-margins|e=i" => \(my $end_margins = 5),
     "fuzzy|f=i" => \(my $fuzzy = 0),
     "overhang-file=s" => \(my $ovh_file),
@@ -37,8 +37,8 @@ if ($help || !@ARGV || @ARGV > 2){
     print "Usage: bam-junctions.pl bam [region] > out\n";
     printf " %-19s  %s\n", "-a/--min-aln-len", "minimum length of aligned read part [$min_aln_len]";
     printf " %-19s  %s\n", "-b/--min-ovh-len", "minimum length of read overhang (clip) [$min_ovh_len]";
-    printf " %-19s  %s\n", "-c/--min-jnc-cov", "minimum overhang support for junction [$min_jnc_cov]";
-    printf " %-19s  %s\n", "-d/--max-ref-cov", "maximum spanning support for junction [$max_ref_cov]";
+    printf " %-19s  %s\n", "-c/--min-jnc-cov", "minimum read support for junction [$min_jnc_cov]";
+    printf " %-19s  %s\n", "-d/--max-ref-cov", "ignore junctions with this many reads supporting the reference, -1 to disable [$max_ref_cov]";
 
     printf " %-19s  %s\n", "-e/--end-margins", "ignore junctions this close to sequence/region ends [$end_margins]";
     printf " %-19s  %s\n", "-f/--fuzzy", "collapse junctions this close to each other [$fuzzy]";
@@ -272,7 +272,7 @@ sub filter_spanned_junctions{
         }
         
         while (my ($k,$v) = each %cov) {
-            if($v->{cov} > $max_ref_cov){
+            if($max_ref_cov > -1 && $v->{cov} > $max_ref_cov){
                 delete($ah->{$v->{pos}}) 
             }else {
                 $rcov{$v->{pos}} = $v->{cov};  
