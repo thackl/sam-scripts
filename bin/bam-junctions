@@ -104,7 +104,7 @@ if ($ovh_file) { open(OVH, ">", $ovh_file) or die $!; }
 
 foreach my $rid (@refs){
     $rc++;
-    print STDERR "processing $rid$from_to $rc/$rn\n";
+    print STDERR "processing $rc/$rn: $rid$from_to $ref_lengths{$rid} bp\n";
 
     print STDERR "  extracting ";
     my ($apre, $asuf) = extract_clipped_alns($rid, $from_to);
@@ -171,8 +171,8 @@ sub extract_clipped_alns{
         my ($suf) = $aln->cigar =~ /(\d+)[SH]$/;
         next unless $pre || $suf;
         next if $aln->length < $min_aln_len;
-        if ($pre && $aln->pos <= $end_margins){ $pre = undef};
-        if ($suf && $aln->pos + length($aln->seq_aligned) >= $ref_lengths{$rid}-$end_margins){ $suf = undef};
+        if ($end_margins && $pre && $aln->pos <= $end_margins){ $pre = undef};
+        if ($end_margins && $suf && $aln->pos + length($aln->seq_aligned) > $ref_lengths{$rid}-$end_margins +1){ $suf = undef};
         
         push @{$apre{$aln->pos}}, $aln if $pre && $pre >= $min_ovh_len;
         push @{$asuf{$aln->pos + length($aln->seq_aligned) -1 }}, $aln if $suf && $suf >= $min_ovh_len;
