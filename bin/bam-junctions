@@ -42,7 +42,7 @@ if ($help || !@ARGV || @ARGV > 2){
 
     printf " %-19s  %s\n", "-e/--end-margins", "ignore junctions this close to sequence/region ends [$end_margins]";
     printf " %-19s  %s\n", "-f/--fuzzy", "collapse junctions this close to each other [$fuzzy]";
- 
+
     printf " %-19s  %s\n", "--overhang-file", "write overhangs to file [".($ovh_file // "OFF")."]";
     printf " %-19s  %s\n", "--overhang-plus", "add this much aligned sequence to overhangs [$ovh_plus]";
 
@@ -106,42 +106,54 @@ foreach my $rid (@refs){
     $rc++;
     print STDERR "processing $rc/$rn: $rid$from_to $ref_lengths{$rid} bp\n";
 
+    print STDERR " junctions\n";
     print STDERR "  extracting ";
     my ($apre, $asuf) = extract_clipped_alns($rid, $from_to);
-    printf STDERR "\r  %10s %9d pre %9d suf\n", "extracted:", keys(%$apre)+0, keys(%$asuf)+0;
+    my $aindel = extract_indel_alns($rid, $from_to);
+    printf STDERR "\r  %10s %9d pre %9d suf %9d indel\n", "extracted:",
+        keys(%$apre)+0, keys(%$asuf)+0, keys(%$aindel)+0;
 
     if ($fuzzy){
         print STDERR "  gathering ";
-        ($apre, $asuf) = gather_nearby_alns($rid, $apre, $asuf);
-        printf STDERR "\r  %10s %9d pre %9d suf\n", "gathered:", keys(%$apre)+0, keys(%$asuf)+0;
+        ($apre, $asuf, $aindel) = gather_nearby_alns($rid, $apre, $asuf, $aindel);
+        printf STDERR "\r  %10s %9d pre %9d suf %9d indel\n", "gathered:", keys(%$apre)+0, keys(%$asuf)+0, keys(%$aindel)+0;
     }else{
         print STDERR "  gathering ";
-        ($apre, $asuf) = apply_min_cov($rid, $apre, $asuf);
+        die '@_ for aindel';
+        ($apre, $asuf, $aindel) = apply_min_cov($rid, $apre, $asuf, $aindel);
         printf STDERR "\r  %10s %9d pre %9d suf\n", "gathered:", keys(%$apre)+0, keys(%$asuf)+0;
     }
 
     print STDERR "  filtering ";
     my $rcov;
     ($apre, $asuf, $rcov) = filter_spanned_junctions($rid, $apre, $asuf);
+
+    # TODO: ref_cov for $aindel - not same as spanned junctions, indel reads by
+    # def. are present on both sides of feat. So alt_cov = total_cov - indel_cov
     printf STDERR "\r  %10s %9d pre %9d suf\n", "filtered:", keys(%$apre)+0, keys(%$asuf)+0;
 
-    report($rid, $apre, 'pre', $rcov);
-    report($rid, $asuf, 'suf', $rcov);
-    
+    report_bed($rid, $apre, 'pre', $rcov);
+    report_bed($rid, $asuf, 'suf', $rcov);
+    report_bed($rid, $aindel, 'indel');
+
 }
 
-sub report{
-    my ($rid, $ah, $label, $rcov) = @_;
-    foreach my $pos (sort by_window_start keys(%$ah)) {
-        my ($from, $to) = pos_from_to($pos);
-        print join("\t", $rid, $from-1, $to, $pos."_".$label, @{$ah->{$pos}}+0, $rcov->{$pos}, "$rid:$from-$to"), "\n";
-    }
-}
 
 
 if ($ovh_file){ close OVH }
 
 #------------------------------------------------------------------------------#
+
+
+sub report_bed{
+    my ($rid, $ah, $label, $rcov) = @_;
+    foreach my $pos (sort by_window_start keys(%$ah)) {
+        my ($from, $to) = pos_from_to($pos);
+        my $cov = @{$ah->{$pos}}+0;
+        my $alt_cov = defined($rcov) ? $rcov->{$pos} : "NA";
+        print join("\t", $rid, $from-1, $to, $label."_".$pos."_".$cov, $cov, $alt_cov, "$rid:$from-$to"), "\n";
+    }
+}
 
 sub by_window_start{
     (split("-",$a,2))[0] <=> (split("-", $b,2))[0]
@@ -152,6 +164,62 @@ sub pos_from_to{
     $to//=$from;
     return($from, $to);
 }
+
+
+# Gather alignments with clipped ends satisfying option cutoffs by position in a
+# prefix and a suffix hash
+# TODO: ignore margins
+# TODO: mismatch hotspots - mismatches from samtools calmd seq
+# TODO: larger indels could also be split alignments
+
+sub extract_indel_alns{
+    my ($rid, $from_to) = (@_, "");
+    my %aindel;
+
+    # filter unmapped or secondary
+    open(SAM, "$samtools view -F 260 $bam_file $rid$from_to |") or die $!;
+    my $sp = Sam::Parser->new(fh => \*SAM);
+    while(my  $aln = $sp->next_aln()){
+        $ac++;
+        print STDERR "." unless $ac % 1000;
+
+        # ignore non trimmed reads
+        next if $aln->length < $min_aln_len;
+        my $cigar = $aln->cigar;
+
+        my $min_indel_len = 5;
+        my $min_indel_score = 15;
+        # inserts/dels from cigar
+        my $score = 0;
+        my $cache = 0;
+        my $ref_pos = $aln->pos;
+        while ($cigar =~ /(\d+)([MDIX=])/g) {
+            #print "\t$1 $2 $ref_pos, $score, $cache\n";
+            if ($2 eq "I" || $2 eq "D"){
+                $ref_pos += $1 if $2 eq "D";
+                $score+=$1 if $1 >= $min_indel_len;
+                #print "$2 $1 $score $ref_pos ",$aln->qname,"\n" if $1 >= $min_indel_len;
+            }else {
+                $ref_pos += $1;
+                if ($cache + $1 < $fuzzy){
+
+                    $cache+=$1;
+                }else {
+                    $cache = 0;
+                    if ( $score > $min_indel_score) {
+                        #print STDERR "$score\t$ref_pos\n";
+                        push @{$aindel{$ref_pos}}, $aln;
+                    }elsif ($score) {
+                        #print "- $score $ref_pos\n";
+                    }
+                    $score = 0;
+                }
+            }
+        };
+    }
+    return \%aindel;
+}
+
 
 # Gather alignments with clipped ends satisfying option cutoffs by position in a
 # prefix and a suffix hash
@@ -165,7 +233,7 @@ sub extract_clipped_alns{
     while(my  $aln = $sp->next_aln()){
         $ac++;
         print STDERR "." unless $ac % 1000;
-        
+
         # ignore non trimmed reads
         my ($pre) = $aln->cigar =~ /^(\d+)[SH]/;
         my ($suf) = $aln->cigar =~ /(\d+)[SH]$/;
@@ -173,7 +241,7 @@ sub extract_clipped_alns{
         next if $aln->length < $min_aln_len;
         if ($end_margins && $pre && $aln->pos <= $end_margins){ $pre = undef};
         if ($end_margins && $suf && $aln->pos + length($aln->seq_aligned) > $ref_lengths{$rid}-$end_margins +1){ $suf = undef};
-        
+
         push @{$apre{$aln->pos}}, $aln if $pre && $pre >= $min_ovh_len;
         push @{$asuf{$aln->pos + length($aln->seq_aligned) -1 }}, $aln if $suf && $suf >= $min_ovh_len;
     }
@@ -194,47 +262,51 @@ sub apply_min_cov{
 
 # Merge alns close to each other into "same" position
 sub gather_nearby_alns{
-    my ($rid, $apre, $asuf) = @_;
-    for my $ah ($apre, $asuf) {
+    my $rid = shift; my $i_set=0;
+    for my $ah (@_) {
+        $i_set++;
         # windowed filter for regions of interest
         my @pos = sort{$a<=>$b}keys %$ah;
         next unless @pos; # no clips
-        my @along = (0) x $ref_lengths{$rid};
+        my @along = (0) x ($ref_lengths{$rid}+1); # pos is 1-off, perl is 0-off, ignore 0;
         @along[@pos] = map{scalar @$_}@{$ah}{@pos};
         my %above;
         # run along ref pos and find windows above threshold
-        my $sum = sum(@along[0..$fuzzy-1]);
+        my $sum = sum(@along[1..$fuzzy-1]); # first win
         $above{1} = $sum if $sum >= $min_jnc_cov;
-        for (my $i=1; $i<@along-$fuzzy; $i++) {
-            $sum = $sum-$along[$i]+$along[$i+$fuzzy];
-            $above{$i+1} = $sum if $sum >= $min_jnc_cov;
-            $above{$i+$fuzzy} = $sum if $sum >= $min_jnc_cov;
-        }
-
-        while (my $k = each %$ah) {
-            delete $ah->{$k} unless exists $above{$k};
-        }
-
-        # collapse adjacent positions
-        my @above = sort{$a<=>$b}keys %$ah;
-        next unless @above >1; # need at least two pos for collapse
-        my @collapsed = ([$above[0]]); # nested structure
-        for (my $i=1;$i<@above;$i++) {
-            if ($above[$i] <= $above[$i-1]+$fuzzy) {
-                push @{$collapsed[-1]}, $above[$i];
-            }else {
-                push @collapsed, [$above[$i]];
+        for (my $i=2; $i<@along-$fuzzy; $i++) {
+            $sum = $sum-$along[$i-1]+$along[$i+$fuzzy];
+            if ($sum >= $min_jnc_cov){
+                $above{$i} = $sum;
             }
         }
+
+
+        # collapse adjacent windows
+        my @above = sort{$a<=>$b}keys %above;
+        next unless @above >1; # need at least two pos for collapse
+        my @wins;
+        my @win = ($above[0], $above[0]+$fuzzy); # collapsed win start,end
+        for (my $i=1;$i<@above;$i++) {
+            if ($above[$i] <= $win[1]) { # expand win
+                $win[1] = $above[$i]+$fuzzy;
+            }else {
+                push @wins, [@win]; # store old win
+                @win = ($above[$i],$above[$i]+$fuzzy) # start new win
+            }
+        }
+        push @wins, [@win]; # store old win
+
         my %collapsed ;
-        foreach (@collapsed) {
-            @pos = @$_;
-            my $win = @pos > 1 ? "$pos[0]-$pos[$#pos]" : $pos[0];
-            $collapsed{$win} = [map{@{$ah->{$_}}}@pos];
+        foreach my $wins (@wins) {
+            my @pos = grep{exists $ah->{$_}}($wins->[0]..$wins->[1]);
+            my $win = join("-", range(@pos));
+            $collapsed{$win} = [];
+            push @{$collapsed{$win}}, @{$ah->{$_}} for @pos;
         }
         $ah = \%collapsed;
     }
-    return($apre,$asuf)
+    return(@_)
 }
 
 sub sum{
@@ -243,12 +315,31 @@ sub sum{
     return $s;
 }
 
+sub min{
+    my $min = $_[0];
+    for (my $i=1;$i<@_;$i++) {
+        $min = $_[$i] if $_[$i] < $min;
+    }
+    return $min;
+}
+
+sub max{
+    my $max = $_[0];
+    for (my $i=1;$i<@_;$i++) {
+        $max = $_[$i] if $_[$i] > $max;
+    }
+    return $max;
+}
+
+sub range{
+    return(min(@_),max(@_));
+}
 
 # get reads spanning the junction
 sub filter_spanned_junctions{
-    my ($rid, $apre, $asuf) = @_;
+    my $rid = shift;
     my %rcov;
-    for my $ah ($apre, $asuf) {
+    for my $ah (@_) {
         my %cov;
 
         my @pos = keys %$ah;
@@ -280,42 +371,16 @@ sub filter_spanned_junctions{
                 }
             }
         }
-        
+
         while (my ($k,$v) = each %cov) {
             if($max_ref_cov > -1 && $v->{cov} > $max_ref_cov){
-                delete($ah->{$v->{pos}}) 
+                delete($ah->{$v->{pos}})
             }else {
-                $rcov{$v->{pos}} = $v->{cov};  
+                $rcov{$v->{pos}} = $v->{cov};
             }
         }
-
-        # my @delete;
-        # my $pos_n = keys %$ah;
-        # my $pos_i = 0;
-        # my $regions = join(" ", map{"$rid:".join("-", pos_from_to($_))}keys %$ah);
-        # my $tmp_bam = "tmp_".$bam_file;
-        # qx(samtools view -b $bam_file $regions | samtools sort -o $tmp_bam; samtools index $tmp_bam);
-        # foreach my $pos (keys %$ah) {
-        #     my ($from, $to) = pos_from_to($pos);
-        #     my $jp = Sam::Parser->new(
-        #         file => $tmp_bam,
-        #         region=>"$rid:$from-$to",
-        #         is => sub{! $_[0]->is(SECONDARY) }
-        #     );
-        #     $pos_i++;
-        #     print "\r$pos_n/$pos_i";
-            
-        #     my $ref_cov = 0;
-        #     while (my n = $jp->next_aln) {
-        #         $ref_cov++ if ($aln->pos < $from-30-$fuzzy) && ($aln->pos + $aln->length > $to+30+$fuzzy);
-        #     }
-        #     push @delete, $pos if $ref_cov > $max_ref_cov;
-        #     $rcov{$pos} = $ref_cov;
-        # }
-        # delete($ah->{$_}) for @delete;
-        # print "\n";
     }
-    return($apre, $asuf, \%rcov);
+    return(@_, \%rcov);
 }
 
 
